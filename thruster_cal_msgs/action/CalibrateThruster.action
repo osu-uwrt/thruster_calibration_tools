@@ -1,0 +1,12 @@
+# request
+string file
+int32 thruster_num
+int32 dshot_min
+int32 dshot_max
+int32 step_size
+---
+# result
+---
+# feedback
+int32 current_dshot
+string message
