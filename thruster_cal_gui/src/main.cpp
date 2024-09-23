@@ -29,13 +29,16 @@ class ThrusterCalGuiNode : public rclcpp::Node
 
     ThrusterCalGuiNode(Ui_ThrusterCalGui *ui)
      : rclcpp::Node("thruster_cal_gui"),
-       ui(ui)
+       ui(ui),
+       doRecurrentManualPub(false)
     {
         // connect buttons
-        ui->centralwidget->connect(ui->sendManualCommand, &QPushButton::clicked, [this]() { this->publishManualDShotCommand(); });
+        ui->centralwidget->connect(ui->sendManualCommand, &QPushButton::clicked, [this]() { this->publishDShotButtonPressed(); });
+        ui->centralwidget->connect(ui->setRawButton, &QPushButton::clicked, [this]() { this->publishManualSetRawState(); });
         ui->centralwidget->connect(ui->publishTrigger, &QPushButton::clicked, [this]() { this->publishTrigger(); });
         ui->centralwidget->connect(ui->calibFileBrowse, &QPushButton::clicked, [this]() { this->browseLogfile(); });
         ui->centralwidget->connect(ui->procedureButton, &QPushButton::clicked, [this]() { this->procedureButtonClicked(); });
+        ui->centralwidget->connect(ui->resetGauge, &QPushButton::clicked, [this]() { this->resetForceGauge(); });
 
         // initialize timer
         this->timer = create_wall_timer(50ms, std::bind(&ThrusterCalGuiNode::timerCb, this));
@@ -50,6 +53,12 @@ class ThrusterCalGuiNode : public rclcpp::Node
         
         this->triggerPub = create_publisher<std_msgs::msg::Empty>(
             "command/trigger", 10);
+        
+        this->setRawPub = create_publisher<std_msgs::msg::Bool>(
+            "dshot_tune/set_raw", 10);
+
+        this->forceGaugeShutdownPub = create_publisher<std_msgs::msg::Empty>(
+            "force_gauge/shutdown", 10);
 
         // initialize subs
         this->thrusterTelemetrySub = create_subscription<riptide_msgs2::msg::DshotPartialTelemetry>(
@@ -76,6 +85,11 @@ class ThrusterCalGuiNode : public rclcpp::Node
             "state/thruster_cal/calibrating",
             10,
             std::bind(&ThrusterCalGuiNode::calibratingCb, this, _1));
+        
+        this->rawStateSub = create_subscription<std_msgs::msg::Bool>(
+            "dshot_tune/set_raw",
+            rclcpp::SensorDataQoS(),
+            std::bind(&ThrusterCalGuiNode::rawStateCb, this, _1));
 
         // initialize state
         rclcpp::Time now = get_clock()->now();
@@ -115,10 +129,21 @@ class ThrusterCalGuiNode : public rclcpp::Node
         ui->forceGaugeOnline->setChecked(now - lastForceGaugeMsgTime < MSG_STALE_TIME);
         ui->calibNodeOnline->setChecked(now - lastCalNodeMsgTime < MSG_STALE_TIME);
         ui->rpmEchoNodeOnline->setChecked(now - lastRpmEchoMsgTime < MSG_STALE_TIME);
+
+        if(doRecurrentManualPub)
+        {
+            publishManualDShotCommandOnTimer();
+        }
     }
 
 
-    void publishManualDShotCommand()
+    void publishDShotButtonPressed()
+    {
+        doRecurrentManualPub = !doRecurrentManualPub;
+    }
+
+
+    void publishManualDShotCommandOnTimer()
     {
         riptide_msgs2::msg::DshotCommand cmd;
         int 
@@ -131,12 +156,27 @@ class ThrusterCalGuiNode : public rclcpp::Node
             commandPub->publish(cmd);
         }
     }
+    
+
+    void publishManualSetRawState()
+    {
+        std_msgs::msg::Bool msg;
+        msg.data = ui->setRaw->isChecked();
+        setRawPub->publish(msg);
+    }
 
 
     void publishTrigger()
     {
         std_msgs::msg::Empty empty;
         this->triggerPub->publish(empty);
+    }
+
+
+    void resetForceGauge()
+    {
+        std_msgs::msg::Empty msg;
+        forceGaugeShutdownPub->publish(msg);
     }
 
 
@@ -160,6 +200,11 @@ class ThrusterCalGuiNode : public rclcpp::Node
             calibrationClient->async_cancel_all_goals();
             return;
         }
+
+        setStatus("Setting raw mode into firmware", false);
+        std_msgs::msg::Bool setRawMsg;
+        setRawMsg.data = true;
+        this->setRawPub->publish(setRawMsg);
 
         setStatus("Attempting to begin procedure", false);
 
@@ -283,8 +328,16 @@ class ThrusterCalGuiNode : public rclcpp::Node
     }
 
 
+    void rawStateCb(std_msgs::msg::Bool::ConstSharedPtr msg)
+    {
+        ui->rawState->setChecked(msg->data);
+    }
+
+
     Ui_ThrusterCalGui *ui;
     rclcpp::TimerBase::SharedPtr timer;
+
+    bool doRecurrentManualPub;
 
     // msg timestamps
     rclcpp::Time
@@ -298,14 +351,19 @@ class ThrusterCalGuiNode : public rclcpp::Node
 
     // msg publishers
     rclcpp::Publisher<riptide_msgs2::msg::DshotCommand>::SharedPtr commandPub;
-    rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr triggerPub;
+    rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr
+        triggerPub,
+        forceGaugeShutdownPub;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr setRawPub;
 
     // msg subscriptions
     rclcpp::Subscription<riptide_msgs2::msg::DshotPartialTelemetry>::SharedPtr thrusterTelemetrySub;
     rclcpp::Subscription<riptide_msgs2::msg::DshotCommand>::SharedPtr dshotCommandSub;
     rclcpp::Subscription<riptide_msgs2::msg::DshotRPMFeedback>::SharedPtr rpmSub;
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr forceSub;
-    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr calibratingSub;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr 
+        calibratingSub,
+        rawStateSub;
 };
 
 ThrusterCalGuiNode::SharedPtr node;

@@ -50,6 +50,14 @@ def generate_launch_description():
                 executable="load_cell_reader.py",
                 name="load_cell_reader",
                 output="screen",
+                respawn=True
+            ),
+            
+            launch_ros.actions.Node(
+                package="riptide_hardware2",
+                executable="rpm_echo",
+                name="rpm_echo_node",
+                output="screen"
             ),
             
             launch_ros.actions.Node(

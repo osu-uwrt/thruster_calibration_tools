@@ -4,9 +4,15 @@ import rclpy
 import serial
 import time
 
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, Empty
 from rclpy.node import Node
 from rclpy.qos import qos_profile_system_default
+
+active = True
+
+def do_shutdown(msg):
+    global active
+    active = False
 
 def main(args=None):
     rclpy.init(args=args)
@@ -14,6 +20,9 @@ def main(args=None):
     node.declare_parameter("port", "/dev/ttyACM0")
     pub = node.create_publisher(
         Float32, "force_gauge/force", qos_profile_system_default)
+    
+    shutdown_sub = node.create_subscription(
+        Empty, "force_gauge/shutdown", do_shutdown, qos_profile_system_default)
 
     openedPort = False
     while(openedPort == False):
@@ -48,17 +57,18 @@ def main(args=None):
                 badReadings += 1
 
     if(badReadings > 5):
-        node.get_logger().warn("Signifcat Number of Bad Readings in Tare: " + str(badReadings))
+        node.get_logger().warn("Significant Number of Bad Readings in Tare: " + str(badReadings))
     
-    while True:
+    while rclpy.ok() and active:
         if ser.in_waiting:
             msg = Float32()
             msg.data = float(ser.readline()[:-2]) - tare
             pub.publish(msg)
-
+        
         # If you change the publish rates on the arduino, adjust this
-        rclpy.spin_once(node, timeout_sec=0.005)
-
+        rclpy.spin_once(node, timeout_sec=0)
+    
+    node.get_logger().info("Shutting down")
     rclpy.shutdown()
 
 
